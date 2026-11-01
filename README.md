@@ -1,0 +1,102 @@
+<p align="center">
+  <img src="assets/icon.png" width="128" alt="Pocket3 PTZ icon">
+</p>
+
+# Pocket3 PTZ
+
+A menu-bar app for aiming a DJI Osmo Pocket 3 from a Mac while the camera is in webcam mode. Pan, tilt, and zoom go over USB. The picture stays in whatever app is using the camera, such as OBS.
+
+This project is not affiliated with DJI.
+
+## What you need
+
+- An Apple Silicon Mac on macOS 14 or later. The download is arm64 only.
+- The Pocket 3 plugged into USB-C, with **Webcam** chosen on the camera. In that mode it does not show up as a disk.
+- The Xcode command-line tools, only if you build it yourself.
+
+The app does not open by itself when you plug the camera in. Open it once. It then stays in the menu bar until you quit it, and it reconnects when the camera comes back.
+
+## Install
+
+1. Download `Pocket3PTZ-1.0.0-mac-arm64.zip` from [Releases](https://github.com/slelham/pocket3-ptz/releases).
+2. Unzip it and move **Pocket3 PTZ** to `/Applications`.
+3. The first time, macOS will block it. The app is signed on the machine that built it, not by Apple. Right-click the app, choose **Open**, and confirm. If that is not offered, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+4. Open the app. A viewfinder icon appears in the menu bar. The app has no Dock icon.
+
+Plug in the Pocket 3 and tap **Webcam** on its screen. The dot in the panel turns green and says **Webcam connected**.
+
+## Controls
+
+Click the menu-bar icon.
+
+| Control | What it does |
+| --- | --- |
+| Pad | Aims the camera. The center of the pad is straight ahead, about 45° of pan and 40° of tilt either way. |
+| Arrows | Step by 1°, 5°, or 15°. These can walk past the pad, out to the gimbal’s full range. |
+| Scope button | Returns to the saved center. |
+| Set as Center | Saves the current angle as that center. |
+| Invert Pan | Swaps left and right. |
+| 1×, 1.5×, 2× | Zoom presets. The lens is 1× at the wide end and 4× at the far end of the slider. |
+| − and + | Zoom by a quarter stop. |
+| Live preview | Optional picture inside the panel. Leave it off if OBS or another app is using the camera. |
+
+From any app:
+
+| Keys | Action |
+| --- | --- |
+| ⌃⌥ and an arrow | Step |
+| ⌃⌥C | Saved center |
+| ⌃⌥− and ⌃⌥= | Zoom out and in. The keypad minus and plus keys do the same. |
+| ⌃⌥0 or ⌃⌥1 | 1× |
+| ⌃⌥2 | 1.5× |
+| ⌃⌥3 | 2× |
+
+The number next to Zoom is the lens position the camera is reporting, so it catches up after you click.
+
+## If it will not move
+
+Zoom can still work when the gimbal will not.
+
+- Press the joystick once. Pressing and holding it locks the gimbal, and a lock ignores pan and tilt from the computer.
+- Turn ActiveTrack off on the camera. It will hold the subject and fight these controls.
+- Gimbal mode (Follow, Tilt Lock, FPV) is chosen on the camera. Webcam mode does not switch it.
+
+## How it works
+
+In webcam mode the Pocket 3 is a standard USB video camera, vendor `0x2ca3`, product `0x0023`. macOS claims the video interface, so the usual USB libraries cannot send camera controls. This app sends USB Video Class requests with IOKit without taking that interface away from OBS or any other app.
+
+| Control | Selector | Value |
+| --- | --- | --- |
+| Zoom absolute | `0x0B` | 100 wide through 400 full, on this camera |
+| Pan and tilt absolute | `0x0D` | 8 bytes, two signed 32-bit arcseconds (3600 per degree) |
+
+Relative pan and tilt are not supported. The camera reports a range of about −35° to 215° of pan and −90° to 90° of tilt, in 1° steps. The wide pan range is what lets the head face the other way. The pad only covers the forward view so that straight ahead sits in the middle.
+
+One pan or tilt command often stops short. The app repeats the aim until the camera reports it is within about a degree, or until the gimbal stops moving. Zoom is different: one command is enough, and the lens reports the new stop about 400ms later. Sending zoom again on every frame holds the lens where it is, which is why zoom out used to fail.
+
+There is also a small command-line tool, `pocket3-ptz`, installed to `~/.local/bin` when you build from source. Add that directory to your `PATH` if you want it in a terminal.
+
+```sh
+pocket3-ptz                  # print pan, tilt, and zoom
+pocket3-ptz set 0 0         # aim, in degrees
+pocket3-ptz nudge -5 0      # step
+pocket3-ptz zoom 150        # 1.5×
+pocket3-ptz zoom in         # a quarter stop
+pocket3-ptz zoom out
+```
+
+## Build
+
+Install the Xcode command-line tools, then:
+
+```sh
+git clone https://github.com/slelham/pocket3-ptz.git
+cd pocket3-ptz
+./build.sh
+```
+
+`clang` and `swiftc` are enough. Xcode itself is not required.
+
+## Thanks
+
+The USB pan and tilt request follows [gimbal-bar](https://github.com/amirmxt/gimbal-bar) by amirmxt, which is MIT licensed. This project is a separate app: it adds zoom, presets, and the follow-through that keeps sending an aim until the gimbal arrives.
