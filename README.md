@@ -37,8 +37,11 @@ Click the menu-bar icon.
 | Set as Center | Saves the current angle as that center. |
 | Invert Pan | Swaps left and right. |
 | 1×, 1.5×, 2× | Zoom presets. The lens is 1× at the wide end and 4× at the far end of the slider. |
-| − and + | Zoom by a quarter stop. |
-| Live preview | Optional picture inside the panel. Leave it off if OBS or another app is using the camera. |
+| − and + | Zoom by 0.25×. The slider moves in smaller steps. |
+| Simple / Advanced | Advanced adds roll, focus, and sliders for the full pan and tilt range. |
+| Live preview | Optional picture inside the panel. The frame is the whole camera picture. Leave it off if OBS or another app is using the camera. |
+| Resolution | Wide 1080 or 4K for that preview. The box stays the same size. 4K is the sharper frame, at 30 fps or below. OBS keeps the resolution set on its source. |
+| Pop out | Moves the whole panel into a window that stays on the desktop. Dock, or the window's close button, puts it back in the menu. |
 
 From any app:
 
@@ -69,10 +72,14 @@ In webcam mode the Pocket 3 is a standard USB video camera, vendor `0x2ca3`, pro
 | --- | --- | --- |
 | Zoom absolute | `0x0B` | 100 wide through 400 full, on this camera |
 | Pan and tilt absolute | `0x0D` | 8 bytes, two signed 32-bit arcseconds (3600 per degree) |
+| Roll absolute | `0x0F` | Degrees, about −30 to +30 on this camera |
+| Focus absolute | `0x06` | 0 through 4095. Selector `0x08` is only an autofocus flag. On this camera it does not hunt, so the app tries a focus move and says so when the lens stays put. |
 
 Relative pan and tilt are not supported. The camera reports a range of about −35° to 215° of pan and −90° to 90° of tilt, in 1° steps. The wide pan range is what lets the head face the other way. The pad only covers the forward view so that straight ahead sits in the middle.
 
-One pan or tilt command often stops short. The app repeats the aim until the camera reports it is within about a degree, or until the gimbal stops moving. Zoom is different: one command is enough, and the lens reports the new stop about 400ms later. Sending zoom again on every frame holds the lens where it is, which is why zoom out used to fail.
+One pan or tilt command often stops short. The app repeats the aim until the camera reports it is within half a degree, so a 1° step is actually sent, or until the gimbal stops moving. Zoom is different: one command is enough, and the lens reports the new stop about 400ms later. Sending zoom again on every frame holds the lens where it is, which is why zoom out used to fail.
+
+Exposure, white balance, and the record button are not on this USB connection. Those stay on the camera. Recording to the card is the shutter button, with a microSD card in and the webcam output at 1080p.
 
 There is also a small command-line tool, `pocket3-companion`, installed to `~/.local/bin` when you build from source. Add that directory to your `PATH` if you want it in a terminal.
 
@@ -81,8 +88,11 @@ pocket3-companion                  # print pan, tilt, and zoom
 pocket3-companion set 0 0         # aim, in degrees
 pocket3-companion nudge -5 0      # step
 pocket3-companion zoom 150        # 1.5×
-pocket3-companion zoom in         # a quarter stop
+pocket3-companion zoom in         # 0.25×
 pocket3-companion zoom out
+pocket3-companion roll 0          # level the horizon
+pocket3-companion focus auto
+pocket3-companion focus 1200      # manual focus
 ```
 
 ## Build

@@ -10,8 +10,11 @@
 
 #define VID 0x2ca3
 #define PID 0x0023
+#define CT_FOCUS_ABS 0x06
+#define CT_FOCUS_AUTO 0x08
 #define CT_ZOOM_ABS 0x0B
 #define CT_PANTILT_ABS 0x0D
+#define CT_ROLL_ABS 0x0F
 #define WINDEX ((1 << 8) | 0) // camera terminal 1, VideoControl interface 0
 
 #define GET_CUR 0x81
@@ -148,19 +151,113 @@ int ptz_zoom_range(int *min, int *max) {
   return 0;
 }
 
+static int16_t deg_i16(double v) {
+  if (v >= 0) v += 0.5;
+  else v -= 0.5;
+  if (v > 32767) v = 32767;
+  if (v < -32768) v = -32768;
+  return (int16_t)v;
+}
+
+static int fill_sense(IOUSBDeviceInterface **dev, ptz_sense_t *out) {
+  int32_t v[2] = {0};
+  uint16_t z = 0, focus = 0;
+  int16_t roll = 0;
+  uint8_t af = 0;
+  if (control(dev, 0xA1, GET_CUR, CT_PANTILT_ABS, v, 8)) return -1;
+  if (control(dev, 0xA1, GET_CUR, CT_ZOOM_ABS, &z, 2)) return -1;
+  if (control(dev, 0xA1, GET_CUR, CT_ROLL_ABS, &roll, 2)) return -1;
+  if (control(dev, 0xA1, GET_CUR, CT_FOCUS_ABS, &focus, 2)) return -1;
+  if (control(dev, 0xA1, GET_CUR, CT_FOCUS_AUTO, &af, 1)) return -1;
+  out->pan = v[0] / 3600.0;
+  out->tilt = v[1] / 3600.0;
+  out->roll = roll;
+  out->zoom = z;
+  out->focus = focus;
+  out->focusAuto = af ? 1 : 0;
+  return 0;
+}
+
 int ptz_read(double *pan, double *tilt, int *zoom) {
+  ptz_sense_t s;
+  if (ptz_sense(&s)) return -1;
+  if (pan) *pan = s.pan;
+  if (tilt) *tilt = s.tilt;
+  if (zoom) *zoom = s.zoom;
+  return 0;
+}
+
+int ptz_sense(ptz_sense_t *out) {
+  if (!out) return -1;
   IOUSBDeviceInterface **dev = open_device();
   if (!dev) return -1;
-  int32_t v[2] = {0};
-  uint16_t z = 0;
-  int rc = control(dev, 0xA1, GET_CUR, CT_PANTILT_ABS, v, 8);
-  if (!rc) rc = control(dev, 0xA1, GET_CUR, CT_ZOOM_ABS, &z, 2);
+  int rc = fill_sense(dev, out);
   close_device(dev);
-  if (rc) return rc;
-  if (pan) *pan = v[0] / 3600.0;
-  if (tilt) *tilt = v[1] / 3600.0;
-  if (zoom) *zoom = z;
+  return rc;
+}
+
+static int scalar_req(UInt8 type, UInt8 req, UInt8 sel, void *data, UInt16 len) {
+  IOUSBDeviceInterface **dev = open_device();
+  if (!dev) return -1;
+  int rc = control(dev, type, req, sel, data, len);
+  close_device(dev);
+  return rc;
+}
+
+int ptz_roll_get(double *roll) {
+  int16_t v = 0;
+  if (scalar_req(0xA1, GET_CUR, CT_ROLL_ABS, &v, 2)) return -1;
+  if (roll) *roll = v;
   return 0;
+}
+
+int ptz_roll_set(double roll) {
+  int16_t v = deg_i16(roll);
+  return scalar_req(0x21, SET_CUR, CT_ROLL_ABS, &v, 2);
+}
+
+int ptz_roll_range(double *min, double *max) {
+  int16_t lo = 0, hi = 0;
+  if (scalar_req(0xA1, GET_MIN, CT_ROLL_ABS, &lo, 2)) return -1;
+  if (scalar_req(0xA1, GET_MAX, CT_ROLL_ABS, &hi, 2)) return -1;
+  if (min) *min = lo;
+  if (max) *max = hi;
+  return 0;
+}
+
+int ptz_focus_get(int *focus) {
+  uint16_t v = 0;
+  if (scalar_req(0xA1, GET_CUR, CT_FOCUS_ABS, &v, 2)) return -1;
+  if (focus) *focus = v;
+  return 0;
+}
+
+int ptz_focus_set(int focus) {
+  if (focus < 0) focus = 0;
+  if (focus > 65535) focus = 65535;
+  uint16_t v = (uint16_t)focus;
+  return scalar_req(0x21, SET_CUR, CT_FOCUS_ABS, &v, 2);
+}
+
+int ptz_focus_range(int *min, int *max) {
+  uint16_t lo = 0, hi = 0;
+  if (scalar_req(0xA1, GET_MIN, CT_FOCUS_ABS, &lo, 2)) return -1;
+  if (scalar_req(0xA1, GET_MAX, CT_FOCUS_ABS, &hi, 2)) return -1;
+  if (min) *min = lo;
+  if (max) *max = hi;
+  return 0;
+}
+
+int ptz_focus_auto_get(int *on) {
+  uint8_t v = 0;
+  if (scalar_req(0xA1, GET_CUR, CT_FOCUS_AUTO, &v, 1)) return -1;
+  if (on) *on = v ? 1 : 0;
+  return 0;
+}
+
+int ptz_focus_auto_set(int on) {
+  uint8_t v = on ? 1 : 0;
+  return scalar_req(0x21, SET_CUR, CT_FOCUS_AUTO, &v, 1);
 }
 
 struct ptz_link {
@@ -188,17 +285,18 @@ void ptz_link_close(void *handle) {
   free(link);
 }
 
-int ptz_link_read(void *handle, double *pan, double *tilt, int *zoom) {
+int ptz_link_sense(void *handle, ptz_sense_t *out) {
   struct ptz_link *link = handle;
-  if (!link) return -1;
-  int32_t v[2] = {0};
-  uint16_t z = 0;
-  int rc = control(link->dev, 0xA1, GET_CUR, CT_PANTILT_ABS, v, 8);
-  if (!rc) rc = control(link->dev, 0xA1, GET_CUR, CT_ZOOM_ABS, &z, 2);
-  if (rc) return rc;
-  if (pan) *pan = v[0] / 3600.0;
-  if (tilt) *tilt = v[1] / 3600.0;
-  if (zoom) *zoom = z;
+  if (!link || !out) return -1;
+  return fill_sense(link->dev, out);
+}
+
+int ptz_link_read(void *handle, double *pan, double *tilt, int *zoom) {
+  ptz_sense_t s;
+  if (ptz_link_sense(handle, &s)) return -1;
+  if (pan) *pan = s.pan;
+  if (tilt) *tilt = s.tilt;
+  if (zoom) *zoom = s.zoom;
   return 0;
 }
 
@@ -218,18 +316,41 @@ int ptz_link_zoom(void *handle, int zoom) {
   return control(link->dev, 0x21, SET_CUR, CT_ZOOM_ABS, &z, 2);
 }
 
+int ptz_link_roll(void *handle, double roll) {
+  struct ptz_link *link = handle;
+  if (!link) return -1;
+  int16_t v = deg_i16(roll);
+  return control(link->dev, 0x21, SET_CUR, CT_ROLL_ABS, &v, 2);
+}
+
+int ptz_link_focus(void *handle, int focus) {
+  struct ptz_link *link = handle;
+  if (!link) return -1;
+  if (focus < 0) focus = 0;
+  if (focus > 65535) focus = 65535;
+  uint16_t v = (uint16_t)focus;
+  return control(link->dev, 0x21, SET_CUR, CT_FOCUS_ABS, &v, 2);
+}
+
+int ptz_link_focus_auto(void *handle, int on) {
+  struct ptz_link *link = handle;
+  if (!link) return -1;
+  uint8_t v = on ? 1 : 0;
+  return control(link->dev, 0x21, SET_CUR, CT_FOCUS_AUTO, &v, 1);
+}
+
 static int close_enough(double pan, double tilt, int zoom, const double *wantPan, const double *wantTilt, const int *wantZoom) {
   if (wantPan && wantTilt) {
     double dp = pan - *wantPan;
     double dt = tilt - *wantTilt;
     if (dp < 0) dp = -dp;
     if (dt < 0) dt = -dt;
-    if (dp > 1.05 || dt > 1.05) return 0;
+    if (dp >= 0.5 || dt >= 0.5) return 0;
   }
   if (wantZoom) {
     int dz = zoom - *wantZoom;
     if (dz < 0) dz = -dz;
-    if (dz > 3) return 0;
+    if (dz > 2) return 0;
   }
   return 1;
 }
@@ -241,7 +362,7 @@ int ptz_settle(const double *pan, const double *tilt, const int *zoom, double se
   if (seconds > 6) seconds = 6;
   int ticks = (int)(seconds / 0.05);
   if (ticks < 4) ticks = 4;
-  int aimStill = 0, zoomStill = 0, lastZoomSend = -100, primed = 0, arrived = 0;
+  int aimStill = 0, zoomStill = 0, lastZoomSend = -100, zoomSent = 0, primed = 0, arrived = 0;
   double prevPan = 0, prevTilt = 0;
   int prevZoom = 0;
   for (int i = 0; i < ticks; i++) {
@@ -256,7 +377,7 @@ int ptz_settle(const double *pan, const double *tilt, const int *zoom, double se
       double dp = p - *pan, dt = t - *tilt;
       if (dp < 0) dp = -dp;
       if (dt < 0) dt = -dt;
-      if (dp > 1.05 || dt > 1.05) {
+      if (dp >= 0.5 || dt >= 0.5) {
         aimPending = 1;
         if (ptz_link_aim(link, *pan, *tilt)) {
           ptz_link_close(link);
@@ -264,17 +385,22 @@ int ptz_settle(const double *pan, const double *tilt, const int *zoom, double se
         }
       }
     }
-    if (zoom && (z > *zoom + 3 || z < *zoom - 3)) {
+    if (zoom && z != *zoom) {
       zoomPending = 1;
-      if (i - lastZoomSend >= 6) {
+      // Send once, then leave the lens alone through its ~400ms update.
+      // A retry sooner than that holds zoom-out on the current stop.
+      int far = z > *zoom + 2 || z < *zoom - 2;
+      if (!zoomSent || (far && i - lastZoomSend >= 10)) {
         if (ptz_link_zoom(link, *zoom)) {
           ptz_link_close(link);
           return -1;
         }
         lastZoomSend = i;
+        zoomSent = 1;
         zoomStill = 0;
-      }
-      if (i - lastZoomSend >= 8) {
+      } else if (i - lastZoomSend >= 8 && !far) {
+        zoomPending = 0;
+      } else if (i - lastZoomSend >= 8) {
         int dz = z - prevZoom;
         if (dz < 0) dz = -dz;
         if (dz <= 1) zoomStill++;

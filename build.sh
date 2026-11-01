@@ -53,7 +53,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSCameraUsageDescription</key><string>Shows an optional live preview while you aim the Pocket 3. Pan, tilt, and zoom work without it.</string>
+  <key>NSCameraUsageDescription</key><string>Shows an optional live preview, and uses that picture when Autofocus can move the lens. Pan, tilt, and zoom work without it.</string>
 </dict></plist>
 EOF
 
