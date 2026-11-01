@@ -35,7 +35,7 @@ final class Preview: ObservableObject {
             $0.localizedName.localizedCaseInsensitiveContains("pocket") || $0.modelID.contains("VendorID_11427")
         }
         guard let device = found, let input = try? AVCaptureDeviceInput(device: device) else {
-            DispatchQueue.main.async { self.status = "Pocket 3 camera is not available" }
+            DispatchQueue.main.async { self.status = "Pocket 3 is not available" }
             return
         }
         session.beginConfiguration()
@@ -476,7 +476,7 @@ struct Panel: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Pocket 3").font(.headline)
+                    Text("Pocket3 Companion").font(.headline)
                     HStack(spacing: 5) {
                         Circle().fill(g.connected ? .green : .secondary).frame(width: 6, height: 6)
                         Text(g.connected ? "Webcam connected" : "Not connected")
@@ -583,10 +583,10 @@ struct Panel: View {
 }
 
 @main
-struct Pocket3PTZApp: App {
+struct Pocket3CompanionApp: App {
     init() { HotKeys.register() }
     var body: some Scene {
-        MenuBarExtra("Pocket 3", systemImage: "camera.viewfinder") {
+        MenuBarExtra("Pocket3 Companion", systemImage: "camera.viewfinder") {
             Panel()
         }
         .menuBarExtraStyle(.window)

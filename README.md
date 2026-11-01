@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="Pocket3 PTZ icon">
+  <img src="assets/icon.png" width="128" alt="Pocket3 Companion icon">
 </p>
 
-# Pocket3 PTZ
+# Pocket3 Companion
 
 A menu-bar app for aiming a DJI Osmo Pocket 3 from a Mac while the camera is in webcam mode. Pan, tilt, and zoom go over USB. The picture stays in whatever app is using the camera, such as OBS.
 
@@ -18,8 +18,8 @@ The app does not open by itself when you plug the camera in. Open it once. It th
 
 ## Install
 
-1. Download `Pocket3PTZ-1.0.0-mac-arm64.zip` from [Releases](https://github.com/slelham/pocket3-ptz/releases).
-2. Unzip it and move **Pocket3 PTZ** to `/Applications`.
+1. Download `Pocket3Companion-1.0.0-mac-arm64.zip` from [Releases](https://github.com/slelham/pocket3-companion/releases).
+2. Unzip it and move **Pocket3 Companion** to `/Applications`.
 3. The first time, macOS will block it. The app is signed on the machine that built it, not by Apple. Right-click the app, choose **Open**, and confirm. If that is not offered, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
 4. Open the app. A viewfinder icon appears in the menu bar. The app has no Dock icon.
 
@@ -74,15 +74,15 @@ Relative pan and tilt are not supported. The camera reports a range of about −
 
 One pan or tilt command often stops short. The app repeats the aim until the camera reports it is within about a degree, or until the gimbal stops moving. Zoom is different: one command is enough, and the lens reports the new stop about 400ms later. Sending zoom again on every frame holds the lens where it is, which is why zoom out used to fail.
 
-There is also a small command-line tool, `pocket3-ptz`, installed to `~/.local/bin` when you build from source. Add that directory to your `PATH` if you want it in a terminal.
+There is also a small command-line tool, `pocket3-companion`, installed to `~/.local/bin` when you build from source. Add that directory to your `PATH` if you want it in a terminal.
 
 ```sh
-pocket3-ptz                  # print pan, tilt, and zoom
-pocket3-ptz set 0 0         # aim, in degrees
-pocket3-ptz nudge -5 0      # step
-pocket3-ptz zoom 150        # 1.5×
-pocket3-ptz zoom in         # a quarter stop
-pocket3-ptz zoom out
+pocket3-companion                  # print pan, tilt, and zoom
+pocket3-companion set 0 0         # aim, in degrees
+pocket3-companion nudge -5 0      # step
+pocket3-companion zoom 150        # 1.5×
+pocket3-companion zoom in         # a quarter stop
+pocket3-companion zoom out
 ```
 
 ## Build
@@ -90,8 +90,8 @@ pocket3-ptz zoom out
 Install the Xcode command-line tools, then:
 
 ```sh
-git clone https://github.com/slelham/pocket3-ptz.git
-cd pocket3-ptz
+git clone https://github.com/slelham/pocket3-companion.git
+cd pocket3-companion
 ./build.sh
 ```
 

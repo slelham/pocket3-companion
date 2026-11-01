@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds the pocket3-ptz command and Pocket3 PTZ.app.
+# Builds the pocket3-companion command and Pocket3 Companion.app.
 # Installs the app into /Applications when that folder is writable,
 # otherwise into ~/Applications. Set APP= to choose the destination.
 set -euo pipefail
@@ -7,10 +7,10 @@ cd "${0:A:h}"
 
 if [[ -z "${APP-}" ]]; then
   if [[ -w /Applications ]]; then
-    APP="/Applications/Pocket3 PTZ.app"
+    APP="/Applications/Pocket3 Companion.app"
   else
     mkdir -p "$HOME/Applications"
-    APP="$HOME/Applications/Pocket3 PTZ.app"
+    APP="$HOME/Applications/Pocket3 Companion.app"
   fi
 fi
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
@@ -19,11 +19,11 @@ rm -rf build "$APP"
 mkdir -p build "$APP/Contents/MacOS" "$APP/Contents/Resources" "$BIN_DIR"
 
 clang -O2 -c ptz.c -o build/ptz.o
-clang -O2 cli.c build/ptz.o -framework IOKit -framework CoreFoundation -o "$BIN_DIR/pocket3-ptz"
+clang -O2 cli.c build/ptz.o -framework IOKit -framework CoreFoundation -o "$BIN_DIR/pocket3-companion"
 swiftc -O -swift-version 5 -parse-as-library -import-objc-header ptz.h \
-  Pocket3PTZ.swift build/ptz.o \
+  Pocket3Companion.swift build/ptz.o \
   -framework IOKit -framework CoreFoundation -framework Carbon -framework AVFoundation \
-  -o "$APP/Contents/MacOS/Pocket3PTZ"
+  -o "$APP/Contents/MacOS/Pocket3Companion"
 
 ICONSET="build/AppIcon.iconset"
 mkdir -p "$ICONSET"
@@ -43,10 +43,10 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Pocket3 PTZ</string>
-  <key>CFBundleDisplayName</key><string>Pocket3 PTZ</string>
-  <key>CFBundleIdentifier</key><string>local.slelham.pocket3-ptz</string>
-  <key>CFBundleExecutable</key><string>Pocket3PTZ</string>
+  <key>CFBundleName</key><string>Pocket3 Companion</string>
+  <key>CFBundleDisplayName</key><string>Pocket3 Companion</string>
+  <key>CFBundleIdentifier</key><string>local.slelham.pocket3-companion</string>
+  <key>CFBundleExecutable</key><string>Pocket3Companion</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
@@ -59,4 +59,4 @@ EOF
 
 codesign --force --sign - "$APP"
 echo "built $APP"
-echo "built $BIN_DIR/pocket3-ptz"
+echo "built $BIN_DIR/pocket3-companion"

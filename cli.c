@@ -7,11 +7,11 @@
 static int usage(void) {
   fprintf(stderr,
           "usage:\n"
-          "  pocket3-ptz                 print pan, tilt, and zoom\n"
-          "  pocket3-ptz set PAN TILT    aim, degrees\n"
-          "  pocket3-ptz nudge DPAN DTILT\n"
-          "  pocket3-ptz zoom N          absolute zoom (100 wide … 400 full)\n"
-          "  pocket3-ptz zoom in|out     step by 25\n");
+          "  pocket3-companion                 print pan, tilt, and zoom\n"
+          "  pocket3-companion set PAN TILT    aim, degrees\n"
+          "  pocket3-companion nudge DPAN DTILT\n"
+          "  pocket3-companion zoom N          absolute zoom (100 wide … 400 full)\n"
+          "  pocket3-companion zoom in|out     step by 25\n");
   return 2;
 }
 
