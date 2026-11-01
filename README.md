@@ -107,6 +107,10 @@ cd pocket3-companion
 
 `clang` and `swiftc` are enough. Xcode itself is not required.
 
+## Support
+
+The app is free. If it saves you time, you can tip on [Venmo @slelham](https://venmo.com/u/slelham).
+
 ## Thanks
 
 The USB pan and tilt request follows [gimbal-bar](https://github.com/amirmxt/gimbal-bar) by amirmxt, which is MIT licensed. This project is a separate app: it adds zoom, presets, and the follow-through that keeps sending an aim until the gimbal arrives.
