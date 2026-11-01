@@ -34,7 +34,6 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(sessionInterrupted(_:)), name: AVCaptureSession.wasInterruptedNotification, object: session)
         center.addObserver(self, selector: #selector(sessionFailed(_:)), name: AVCaptureSession.runtimeErrorNotification, object: session)
-        center.addObserver(self, selector: #selector(sessionStarted(_:)), name: AVCaptureSession.didStartRunningNotification, object: session)
     }
 
     func acquire(_ id: String) {
@@ -59,9 +58,29 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         if idle { stop(ticket) }
     }
 
+    func permitCamera() {
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            DispatchQueue.main.async {
+                guard granted else {
+                    self.status = "Camera access is off in System Settings"
+                    return
+                }
+                self.status = ""
+                self.acquire("menu")
+            }
+        }
+    }
+
     /// Applies the saved 1080 or 4K choice. The camera's own default is a
     /// vertical 1080 frame, which sits in the middle of the wide preview.
     func useCaptureSize() {
+        keepCaptureSize()
+    }
+
+    /// Puts the saved size back after the session starts, after a configuration
+    /// batch, or after the preview layer is attached or removed. Disconnecting
+    /// that layer while the session is running selects portrait 1080 again.
+    func keepCaptureSize() {
         queue.async {
             guard self.configured else { return }
             self.applyFormat()
@@ -88,7 +107,10 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         queue.async {
             if !self.configured { self.configure() }
             self.ensureDataOutput()
-            if self.configured, !self.session.isRunning { self.session.startRunning() }
+            if self.configured, !self.session.isRunning {
+                _ = p3_session_start(Unmanaged.passUnretained(self.session).toOpaque())
+            }
+            if self.configured { self.applyFormat() }
             ready.signal()
         }
         if ready.wait(timeout: .now() + 2) != .success { return nil }
@@ -153,28 +175,33 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
 
     private func start(_ ticket: Int) {
         DispatchQueue.main.async {
-            if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
-                self.status = "Allow camera access to see the picture"
-                NSApp.activate()
+            let auth = AVCaptureDevice.authorizationStatus(for: .video)
+            if auth == .denied || auth == .restricted {
+                self.status = "Camera access is off in System Settings"
+                return
             }
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                guard granted else {
-                    DispatchQueue.main.async { self.status = "Camera access is off in System Settings" }
+            if auth == .notDetermined {
+                self.status = "Allow camera access to see the picture"
+                return
+            }
+            self.queue.async {
+                self.stateLock.lock()
+                let current = self.runTicket
+                let want = !self.holds.isEmpty
+                self.stateLock.unlock()
+                guard want, current == ticket else { return }
+                if !self.configured { self.configure() }
+                guard self.configured else { return }
+                if !self.session.isRunning {
+                    _ = p3_session_start(Unmanaged.passUnretained(self.session).toOpaque())
+                }
+                guard self.session.isRunning else {
+                    DispatchQueue.main.async { self.status = "Couldn't open the Pocket 3 picture" }
                     return
                 }
-                self.queue.async {
-                    self.stateLock.lock()
-                    let current = self.runTicket
-                    let want = !self.holds.isEmpty
-                    self.stateLock.unlock()
-                    guard want, current == ticket else { return }
-                    if !self.configured { self.configure() }
-                    guard self.configured else { return }
-                    if !self.session.isRunning { self.session.startRunning() }
-                    DispatchQueue.main.async {
-                        self.status = self.session.isRunning ? "" : "Couldn't open the Pocket 3 picture"
-                    }
-                }
+                // Starting selects the camera's portrait 1080. Set the wide
+                // size after that, or the preview stays a strip in the middle.
+                self.applyFormat()
             }
         }
     }
@@ -186,7 +213,10 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
             let want = !self.holds.isEmpty
             self.stateLock.unlock()
             guard current == ticket, !want, self.session.isRunning else { return }
-            self.session.stopRunning()
+            _ = p3_session_stop(Unmanaged.passUnretained(self.session).toOpaque())
+            // The chosen size survives the stop. Put it back in case the
+            // preview layer was disconnected first and selected portrait 1080.
+            self.applyFormat()
         }
     }
 
@@ -215,12 +245,12 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
             return
         }
         session.addInput(input)
+        session.commitConfiguration()
         camera = device
         configured = true
-        // Setting the format selects it. A session preset such as .medium
-        // would replace it, and on macOS that preset is what made the picture small.
-        applyFormat(inConfiguration: true)
-        session.commitConfiguration()
+        // Do not set the format here. The first startRunning selects portrait
+        // 1080, and a later begin/commit does it again. applyFormat runs after
+        // the session is running and is never wrapped in that batch.
     }
 
     /// Wide 1080 or 4K at 30 fps or below. 4K above 30 fps is listed by this
@@ -246,30 +276,55 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         return (best.0, best.1)
     }
 
-    private func applyFormat(inConfiguration: Bool = false) {
+    /// Sets the wide 1080 or 4K format directly. Wrapping this in
+    /// beginConfiguration/commitConfiguration makes the camera show the new
+    /// size for a moment and then return to portrait 1080, while the control
+    /// still says 4K. Must run on the preview queue.
+    private func applyFormat() {
+        applyFormat(attempt: 0)
+    }
+
+    private func applyFormat(attempt: Int) {
         guard let camera else { return }
         let size = UserDefaults.standard.string(forKey: "captureSize") ?? "1080"
         guard let choice = chooseFormat(on: camera, size: size) else {
             DispatchQueue.main.async { self.status = "That resolution is not available" }
             return
         }
-        if !inConfiguration { session.beginConfiguration() }
-        defer { if !inConfiguration { session.commitConfiguration() } }
-        do {
-            try camera.lockForConfiguration()
-            camera.activeFormat = choice.format
-            let frame = CMTime(value: 1, timescale: choice.fps)
-            camera.activeVideoMinFrameDuration = frame
-            camera.activeVideoMaxFrameDuration = frame
-            camera.unlockForConfiguration()
-        } catch {
-            DispatchQueue.main.async { self.status = "Couldn't switch the picture size" }
+        let rc = p3_apply_format(
+            Unmanaged.passUnretained(camera).toOpaque(),
+            Unmanaged.passUnretained(choice.format).toOpaque(),
+            choice.fps
+        )
+        let dim = CMVideoFormatDescriptionGetDimensions(camera.activeFormat.formatDescription)
+        let wantW: Int32 = size == "4k" ? 3840 : 1920
+        let wantH: Int32 = size == "4k" ? 2160 : 1080
+        if rc == 0, dim.width == wantW, dim.height == wantH {
+            DispatchQueue.main.async { self.clearPictureStatus() }
+            return
+        }
+        if attempt < 1 {
+            applyFormat(attempt: 1)
             return
         }
         DispatchQueue.main.async {
-            if self.status == "That resolution is not available" || self.status == "Couldn't switch the picture size" {
-                self.status = ""
+            if rc != 0 {
+                self.status = "Couldn't switch the picture size"
+                return
             }
+            let actual = (dim.width == 3840 && dim.height == 2160) ? "4k" : "1080"
+            if UserDefaults.standard.string(forKey: "captureSize") != actual {
+                UserDefaults.standard.set(actual, forKey: "captureSize")
+            }
+            self.status = "Camera stayed on \(dim.width)×\(dim.height)"
+        }
+    }
+
+    private func clearPictureStatus() {
+        if status == "That resolution is not available"
+            || status == "Couldn't switch the picture size"
+            || status.hasPrefix("Camera stayed on") {
+            status = ""
         }
     }
 
@@ -287,6 +342,9 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
             dataOutput = output
         }
         session.commitConfiguration()
+        // Adding an output batches a configuration, which drops the camera
+        // back to portrait 1080. Put the selected size back immediately.
+        applyFormat()
     }
 
     private func removeDataOutput() {
@@ -296,6 +354,7 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         session.removeOutput(output)
         session.commitConfiguration()
         dataOutput = nil
+        applyFormat()
     }
 
     @objc private func sessionInterrupted(_ note: Notification) {
@@ -307,13 +366,6 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
 
     @objc private func sessionFailed(_ note: Notification) {
         DispatchQueue.main.async { self.status = "Couldn't open the Pocket 3 picture" }
-    }
-
-    @objc private func sessionStarted(_ note: Notification) {
-        DispatchQueue.main.async {
-            guard self.session.isRunning else { return }
-            self.status = ""
-        }
     }
 }
 
@@ -334,6 +386,8 @@ struct PreviewView: NSViewRepresentable {
             super.init(frame: .zero)
             wantsLayer = true
             layer?.addSublayer(previewLayer)
+            // Attaching this layer to a running session selects portrait 1080.
+            Preview.shared.keepCaptureSize()
         }
 
         required init?(coder: NSCoder) { fatalError() }
@@ -354,8 +408,17 @@ struct PreviewView: NSViewRepresentable {
     func updateNSView(_ nsView: LayerView, context: Context) {
         if nsView.previewLayer.session !== session {
             nsView.previewLayer.session = session
+            Preview.shared.keepCaptureSize()
         }
-        nsView.needsLayout = true
+    }
+
+    /// The menu will not open a second time if this layer is still attached
+    /// when the panel closes. Disconnecting it while the session is running
+    /// selects portrait 1080, so the saved size is put back afterwards.
+    static func dismantleNSView(_ nsView: LayerView, coordinator: ()) {
+        nsView.previewLayer.session = nil
+        nsView.previewLayer.removeFromSuperlayer()
+        Preview.shared.keepCaptureSize()
     }
 
     /// Never echo an infinite proposal. That collapsed the preview to nothing.
@@ -1334,6 +1397,7 @@ struct Panel: View {
         }
         .onAppear {
             if !floating { preview.setMenuAttached(true) }
+            if !floating { holdMenuWindow() }
             syncPreview()
         }
         .onDisappear {
@@ -1342,6 +1406,19 @@ struct Panel: View {
         }
         .onChange(of: showPreview) { _, _ in syncPreview() }
         .onChange(of: preview.popped) { _, _ in syncPreview() }
+    }
+
+    /// A menu panel closes itself when the app is no longer the active one.
+    /// Starting the camera does that. Keep this panel on screen.
+    private func holdMenuWindow() {
+        DispatchQueue.main.async {
+            for window in NSApp.windows where !(window is PreviewPanel) {
+                let name = window.contentView.map { String(describing: type(of: $0)) } ?? ""
+                if name.contains("NSHostingView") {
+                    window.hidesOnDeactivate = false
+                }
+            }
+        }
     }
 
     private func syncPreview() {
@@ -1404,6 +1481,10 @@ struct Panel: View {
             Toggle("Live preview", isOn: $showPreview)
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
+            if preview.status == "Allow camera access to see the picture" {
+                Button("Allow camera") { preview.permitCamera() }
+                    .controlSize(.small)
+            }
 
             Picker("Resolution", selection: $captureSize) {
                 Text("1080").tag("1080")
@@ -1412,9 +1493,6 @@ struct Panel: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .onChange(of: captureSize) { _, _ in preview.useCaptureSize() }
-            Text("Wide picture. 4K is sharper. This box stays the same size.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
 
             Pad(g: g)
 

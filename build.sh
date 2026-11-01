@@ -19,10 +19,11 @@ rm -rf build "$APP"
 mkdir -p build "$APP/Contents/MacOS" "$APP/Contents/Resources" "$BIN_DIR"
 
 clang -O2 -c ptz.c -o build/ptz.o
+clang -O2 -fobjc-arc -c format.m -o build/format.o
 clang -O2 cli.c build/ptz.o -framework IOKit -framework CoreFoundation -o "$BIN_DIR/pocket3-companion"
 swiftc -O -swift-version 5 -parse-as-library -import-objc-header ptz.h \
-  Pocket3Companion.swift build/ptz.o \
-  -framework IOKit -framework CoreFoundation -framework Carbon -framework AVFoundation \
+  Pocket3Companion.swift build/ptz.o build/format.o \
+  -framework IOKit -framework CoreFoundation -framework Carbon -framework AVFoundation -framework Foundation \
   -o "$APP/Contents/MacOS/Pocket3Companion"
 
 ICONSET="build/AppIcon.iconset"

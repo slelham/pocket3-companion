@@ -57,4 +57,10 @@ int ptz_link_focus_auto(void *link, int on);
 // skips aim. A NULL zoom skips zoom. Returns 0 if the camera got there.
 int ptz_settle(const double *pan, const double *tilt, const int *zoom, double seconds);
 
+// Sets an AVCaptureDevice format. Returns 0 on success. A thrown camera
+// exception is caught here so the caller stays alive.
+int p3_apply_format(void *device, void *format, int fps);
+int p3_session_start(void *session);
+int p3_session_stop(void *session);
+
 #endif
