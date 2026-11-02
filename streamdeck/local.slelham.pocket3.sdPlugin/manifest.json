@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "local.slelham.pocket3",
+  "Name": "Pocket3 Companion",
+  "Version": "1.0.0.0",
+  "Author": "slelham",
+  "Description": "Recall a Pocket 3 preset, hold to pan, tilt, and zoom, recenter, or stop.",
+  "Icon": "imgs/plugin",
+  "Category": "Pocket3",
+  "CategoryIcon": "imgs/category",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.6" },
+  "Nodejs": { "Version": "20" },
+  "OS": [{ "Platform": "mac", "MinimumVersion": "14" }],
+  "URL": "https://github.com/slelham/pocket3-companion",
+  "Actions": [
+    {
+      "Name": "Recall Preset",
+      "UUID": "local.slelham.pocket3.recall",
+      "Icon": "imgs/recall",
+      "Tooltip": "Move to a saved pan, tilt, and zoom.",
+      "PropertyInspectorPath": "ui/recall.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/recall", "TitleAlignment": "bottom", "FontSize": "11" }]
+    },
+    {
+      "Name": "Pan / Tilt",
+      "UUID": "local.slelham.pocket3.move",
+      "Icon": "imgs/move",
+      "Tooltip": "Hold to pan or tilt. Release to stop.",
+      "PropertyInspectorPath": "ui/move.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/move", "TitleAlignment": "bottom", "FontSize": "11" }]
+    },
+    {
+      "Name": "Zoom",
+      "UUID": "local.slelham.pocket3.zoom",
+      "Icon": "imgs/zoom",
+      "Tooltip": "Hold to zoom. Release to stop.",
+      "PropertyInspectorPath": "ui/zoom.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/zoom", "TitleAlignment": "bottom", "FontSize": "11" }]
+    },
+    {
+      "Name": "Recenter",
+      "UUID": "local.slelham.pocket3.recenter",
+      "Icon": "imgs/recenter",
+      "Tooltip": "Walk back to the saved center.",
+      "PropertyInspectorPath": "ui/plain.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/recenter", "TitleAlignment": "bottom", "FontSize": "11" }]
+    },
+    {
+      "Name": "Stop",
+      "UUID": "local.slelham.pocket3.stop",
+      "Icon": "imgs/stop",
+      "Tooltip": "Stop scheduling pan, tilt, and zoom.",
+      "PropertyInspectorPath": "ui/plain.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/stop", "TitleAlignment": "bottom", "FontSize": "11" }]
+    }
+  ]
+}

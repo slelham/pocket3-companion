@@ -38,9 +38,13 @@ Click the menu-bar icon.
 | Invert Pan | Swaps left and right. |
 | 1×, 1.5×, 2× | Zoom presets. The lens is 1× at the wide end and 4× at the far end of the slider. |
 | − and + | Zoom by 0.25×. The slider moves in smaller steps. |
+| Presets | Up to twenty saved pan, tilt, and zoom framings. **Add Preset** stores the current one. Click a preset to recall it. **Move** walks there. **Jump** sends the angle at once. Choosing another preset replaces a move that is still running. |
+| 15°/s and 32°/s | Speed of a move, a held key, and recenter. A preset can keep its own speeds. |
+| Scope button | Moves back to the saved center at that speed. Esc stops the move. |
+| Stop | Stops scheduling pan, tilt, and zoom. Esc does the same when the panel has the keyboard. |
 | Simple / Advanced | Advanced adds roll, focus, and sliders for the full pan and tilt range. |
 | Live preview | Optional picture inside the panel. The frame is the whole camera picture. Leave it off if OBS or another app is using the camera. |
-| Resolution | Wide 1080 or 4K for that preview. The box stays the same size. 4K is the sharper frame, at 30 fps or below. OBS keeps the resolution set on its source. |
+| Resolution | Wide 1080 or 4K for that preview. The box stays the same size. The line under the control is the size and frame rate the camera is delivering. 4K is the sharper frame, at 30 fps or below. OBS keeps the resolution set on its source. |
 | Pop out | Moves the whole panel into a window that stays on the desktop. Dock, or the window's close button, puts it back in the menu. |
 
 From any app:
@@ -54,7 +58,27 @@ From any app:
 | ⌃⌥2 | 1.5× |
 | ⌃⌥3 | 2× |
 
+With the panel in front, hold **W A S D** to tilt and pan, **Q E Z X** for the diagonals, and **↑ ↓** to zoom. Release a key to stop that direction. **Esc** stops scheduling. These keys stay out of text fields.
+
 The number next to Zoom is the lens position the camera is reporting, so it catches up after you click.
+
+## Presets and other software
+
+Presets stay on this Mac. **Preset tools → Export** writes a JSON file, and **Import** adds presets from one until the list is full.
+
+**Local control** listens on `127.0.0.1:47323` only. It is off until you turn it on. Requests need the key in a header, `Authorization: Bearer …` or `X-Pocket3-Key`. The panel copies a ready-to-run command. Empty slots do nothing.
+
+```sh
+curl -s http://127.0.0.1:47323/v1/status -H "Authorization: Bearer KEY"
+curl -s http://127.0.0.1:47323/v1/presets -H "Authorization: Bearer KEY"
+curl -s -X POST http://127.0.0.1:47323/v1/presets/1/recall -H "Authorization: Bearer KEY"
+curl -s -X POST http://127.0.0.1:47323/v1/recenter -H "Authorization: Bearer KEY"
+curl -s -X POST http://127.0.0.1:47323/v1/stop -H "Authorization: Bearer KEY"
+```
+
+**Stream Deck** 6.6 or later uses that same connection. In Preset tools, **Install** pairs this Mac and opens the plugin. Stream Deck then asks you to confirm it. **Connect** pairs again. **Disconnect** stops the deck until the next Connect. The plugin has no key to paste in, and a new curl key does not disconnect it.
+
+Recall Preset lists the preset names. Renaming or reordering a preset keeps the key on that preset. A deleted preset does nothing. Pan / Tilt and Zoom move while the key is held and stop when you let go. Several of those keys can be held at once. Recenter walks to the saved center. Stop drops pan, tilt, and zoom that have not been sent.
 
 ## If it will not move
 
@@ -105,7 +129,7 @@ cd pocket3-companion
 ./build.sh
 ```
 
-`clang` and `swiftc` are enough. Xcode itself is not required.
+`clang` and `swiftc` are enough. Xcode itself is not required. The build also packs the Stream Deck plugin into the app.
 
 ## Support
 
@@ -113,4 +137,4 @@ The app is free. If it saves you time, you can tip on [Venmo @slelham](https://v
 
 ## Thanks
 
-The USB pan and tilt request follows [gimbal-bar](https://github.com/amirmxt/gimbal-bar) by amirmxt, which is MIT licensed. This project is a separate app: it adds zoom, presets, and the follow-through that keeps sending an aim until the gimbal arrives.
+The USB pan and tilt request follows [gimbal-bar](https://github.com/amirmxt/gimbal-bar) by amirmxt, which is MIT licensed. This project is a separate app: it adds zoom, presets, a Stream Deck plugin, and the follow-through that keeps sending an aim until the gimbal arrives.

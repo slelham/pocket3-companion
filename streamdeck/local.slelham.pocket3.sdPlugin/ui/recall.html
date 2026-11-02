@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Recall Preset</title>
+  <style>
+    html, body { margin: 0; padding: 12px 16px; background: #2d2d2d; color: #e8e8e8; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; }
+    label { display: block; color: #bdbdbd; }
+    select { width: 100%; margin-top: 6px; padding: 6px; background: #1c1c1c; color: inherit; border: 1px solid #4a4a4a; border-radius: 4px; }
+    p { margin: 10px 0 0; color: #9a9a9a; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <label for="preset">Preset</label>
+  <select id="preset"></select>
+  <p id="note"></p>
+  <script>
+    var websocket = null;
+    var context = "";
+    var filling = false;
+    var currentId = "";
+    var lastKey = "";
+
+    function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+      context = inUUID;
+      currentId = setting(inActionInfo, "presetId");
+      websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+      websocket.onopen = function () {
+        websocket.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
+        websocket.send(JSON.stringify({ event: "sendToPlugin", context: inUUID, payload: {} }));
+      };
+      websocket.onmessage = function (evt) {
+        var msg = parse(evt.data);
+        if (!msg) return;
+        if (msg.event === "didReceiveSettings") currentId = setting(msg, "presetId") || currentId;
+        if (msg.event === "sendToPropertyInspector") fill(msg.payload || {});
+      };
+    }
+
+    function parse(text) {
+      try { return JSON.parse(text); } catch (error) { return null; }
+    }
+
+    function setting(info, key) {
+      var data = info;
+      if (typeof info === "string") data = parse(info) || {};
+      var settings = data && data.payload && data.payload.settings;
+      return settings && settings[key] ? String(settings[key]) : "";
+    }
+
+    function fill(payload) {
+      var presets = payload.presets || [];
+      var id = payload.presetId || currentId;
+      var key = presets.map(function (item) { return item.id + "\t" + item.name; }).join("\n") + "\n" + id + "\n" + (payload.offline ? "off" : "on");
+      var note = document.getElementById("note");
+      if (payload.offline) note.textContent = "Open Pocket3 Companion and choose Connect.";
+      else if (!presets.length) note.textContent = "Add a preset in Pocket3 Companion.";
+      else note.textContent = "Renaming or reordering keeps this key. A deleted preset does nothing.";
+      if (key === lastKey) return;
+      lastKey = key;
+      var select = document.getElementById("preset");
+      filling = true;
+      select.innerHTML = "";
+      var placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = presets.length ? "Choose a preset" : "No presets yet";
+      select.appendChild(placeholder);
+      var found = false;
+      presets.forEach(function (item) {
+        var option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name;
+        if (id && String(item.id).toLowerCase() === String(id).toLowerCase()) {
+          option.selected = true;
+          found = true;
+        }
+        select.appendChild(option);
+      });
+      if (id && !found) {
+        var gone = document.createElement("option");
+        gone.value = id;
+        gone.textContent = "Deleted preset";
+        gone.selected = true;
+        select.appendChild(gone);
+      }
+      filling = false;
+    }
+
+    document.getElementById("preset").addEventListener("change", function () {
+      if (filling || !websocket) return;
+      currentId = this.value;
+      lastKey = "";
+      websocket.send(JSON.stringify({
+        event: "setSettings",
+        context: context,
+        payload: { presetId: currentId }
+      }));
+    });
+  </script>
+</body>
+</html>

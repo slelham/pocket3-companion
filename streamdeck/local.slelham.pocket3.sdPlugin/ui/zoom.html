@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Zoom</title>
+  <style>
+    html, body { margin: 0; padding: 12px 16px; background: #2d2d2d; color: #e8e8e8; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; }
+    label { display: block; color: #bdbdbd; }
+    select { width: 100%; margin-top: 6px; padding: 6px; background: #1c1c1c; color: inherit; border: 1px solid #4a4a4a; border-radius: 4px; }
+    p { margin: 10px 0 0; color: #9a9a9a; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <label for="direction">Zoom</label>
+  <select id="direction">
+    <option value="in">Zoom in</option>
+    <option value="out">Zoom out</option>
+  </select>
+  <p>Hold the key to zoom. Release to stop.</p>
+  <script>
+    var websocket = null;
+    var context = "";
+    var filling = false;
+
+    function connectElgatoStreamDeckSocket(inPort, inUUID, inRegisterEvent, inInfo, inActionInfo) {
+      context = inUUID;
+      websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+      websocket.onopen = function () {
+        websocket.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
+      };
+      websocket.onmessage = function (evt) {
+        var msg = parse(evt.data);
+        if (!msg) return;
+        if (msg.event === "sendToPropertyInspector") choose((msg.payload && msg.payload.direction) || "");
+        if (msg.event === "didReceiveSettings") choose(setting(msg, "direction"));
+      };
+      choose(setting(inActionInfo, "direction") || "in");
+    }
+
+    function parse(text) {
+      try { return JSON.parse(text); } catch (error) { return null; }
+    }
+
+    function setting(info, key) {
+      var data = info;
+      if (typeof info === "string") data = parse(info) || {};
+      var settings = data && data.payload && data.payload.settings;
+      return settings && settings[key] ? String(settings[key]) : "";
+    }
+
+    function choose(direction) {
+      var select = document.getElementById("direction");
+      var next = direction === "out" ? "out" : "in";
+      if (select.value === next) return;
+      filling = true;
+      select.value = next;
+      filling = false;
+    }
+
+    document.getElementById("direction").addEventListener("change", function () {
+      if (filling || !websocket) return;
+      websocket.send(JSON.stringify({
+        event: "setSettings",
+        context: context,
+        payload: { direction: this.value }
+      }));
+    });
+  </script>
+</body>
+</html>

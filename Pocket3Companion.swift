@@ -12,6 +12,7 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
 
     let session = AVCaptureSession()
     @Published var status = ""
+    @Published var picture = ""
     @Published var popped = false
 
     private let queue = DispatchQueue(label: "pocket3.preview")
@@ -297,10 +298,16 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
             choice.fps
         )
         let dim = CMVideoFormatDescriptionGetDimensions(camera.activeFormat.formatDescription)
+        let fps = p3_active_fps(Unmanaged.passUnretained(camera).toOpaque())
         let wantW: Int32 = size == "4k" ? 3840 : 1920
         let wantH: Int32 = size == "4k" ? 2160 : 1080
         if rc == 0, dim.width == wantW, dim.height == wantH {
-            DispatchQueue.main.async { self.clearPictureStatus() }
+            let width = dim.width
+            let height = dim.height
+            DispatchQueue.main.async {
+                self.notePicture(width: width, height: height, fps: fps)
+                self.clearPictureStatus()
+            }
             return
         }
         if attempt < 1 {
@@ -317,6 +324,15 @@ final class Preview: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
                 UserDefaults.standard.set(actual, forKey: "captureSize")
             }
             self.status = "Camera stayed on \(dim.width)×\(dim.height)"
+            self.notePicture(width: dim.width, height: dim.height, fps: fps)
+        }
+    }
+
+    private func notePicture(width: Int32, height: Int32, fps: Double) {
+        if fps >= 1 {
+            picture = "\(width)×\(height) · \(Int(fps.rounded())) fps"
+        } else {
+            picture = "\(width)×\(height)"
         }
     }
 
@@ -652,6 +668,19 @@ final class AimTarget: @unchecked Sendable {
         shot.focusAuto = nil
         return true
     }
+
+    func clearPanTilt() {
+        lock.lock()
+        shot.pan = nil
+        shot.tilt = nil
+        lock.unlock()
+    }
+
+    func clearZoom() {
+        lock.lock()
+        shot.zoom = nil
+        lock.unlock()
+    }
 }
 
 final class FocusToken: @unchecked Sendable {
@@ -721,6 +750,7 @@ final class Gimbal: ObservableObject {
     @Published var aimFocus: Double?
     @Published var aimFocusAuto: Bool?
     @Published var focusNote = ""
+    @Published private(set) var busy = false
 
     @AppStorage("stepDegrees") var step = 5
     @AppStorage("invertPan") var invertPan = false
@@ -741,6 +771,20 @@ final class Gimbal: ObservableObject {
     private var driving = false
     private var sweeping = false
     private var timer: Timer?
+    private var motionTimer: Timer?
+    private var motionGen = 0
+    private var zoomGoal: Double?
+    private var zoomPace = 15.0
+    /// The last held zoom step can be under five units. Finish that step once
+    /// the previous command has landed, and not before.
+    private var zoomFinish = false
+    private var holds: [String: HoldAxes] = [:]
+    private var holdTimer: Timer?
+    private var heldZoom = false
+
+    var motionSpeed: Double {
+        UserDefaults.standard.integer(forKey: "moveSpeed") == 32 ? 32 : 15
+    }
 
     init() {
         refresh()
@@ -788,6 +832,12 @@ final class Gimbal: ObservableObject {
     }
 
     func go(pan: Double, tilt: Double) {
+        aim(pan: pan, tilt: tilt, fromMotion: false)
+    }
+
+    /// A glide and a held key pass `fromMotion` so they do not cancel themselves.
+    private func aim(pan: Double, tilt: Double, fromMotion: Bool) {
+        if !fromMotion { cancelMotion() }
         let p = min(max(pan, range.panMin), range.panMax)
         let t = min(max(tilt, range.tiltMin), range.tiltMax)
         aimPan = p
@@ -803,10 +853,152 @@ final class Gimbal: ObservableObject {
         go(pan: basePan + dx * Double(step) * sign, tilt: baseTilt + dy * Double(step))
     }
 
-    func recenter() { go(pan: homePan, tilt: homeTilt) }
+    /// Walks to the saved center. Esc stops the walk. The default center is
+    /// straight ahead, pan 0° and tilt 0°.
+    func recenter() {
+        recall(pan: homePan, tilt: homeTilt, zoom: nil, move: true, panSpeed: nil, zoomSpeed: nil)
+    }
+
     func setHome() { homePan = aimPan ?? pan; homeTilt = aimTilt ?? tilt }
 
     func setZoom(_ value: Double) {
+        cancelMotion()
+        commitZoom(value)
+    }
+
+    func nudgeZoom(_ delta: Double) { setZoom((aimZoom ?? zoom) + delta) }
+
+    /// Recalls a framing. A new recall replaces one that is still running.
+    /// Zoom is sent in steps: repeating one zoom command holds the lens.
+    func recall(pan: Double, tilt: Double, zoom: Double?, move: Bool, panSpeed: Double?, zoomSpeed: Double?) {
+        cancelMotion()
+        let destPan = min(max(pan, range.panMin), range.panMax)
+        let destTilt = min(max(tilt, range.tiltMin), range.tiltMax)
+        let destZoom = zoom.map { min(max($0, zoomMin), zoomMax).rounded() }
+        guard move else {
+            aim(pan: destPan, tilt: destTilt, fromMotion: true)
+            if let destZoom { commitZoom(destZoom) }
+            return
+        }
+        let gen = motionGen
+        let pSpeed = max(5, panSpeed ?? motionSpeed)
+        let zSpeed = max(5, zoomSpeed ?? motionSpeed)
+        let started = Date()
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            Task { @MainActor in
+                guard let self, self.motionGen == gen else {
+                    timer.invalidate()
+                    return
+                }
+                self.glide(
+                    timer: timer,
+                    destPan: destPan,
+                    destTilt: destTilt,
+                    destZoom: destZoom,
+                    pSpeed: pSpeed,
+                    zSpeed: zSpeed,
+                    started: started
+                )
+            }
+        }
+        motionTimer = timer
+        busy = true
+        RunLoop.main.add(timer, forMode: .common)
+        glide(timer: timer, destPan: destPan, destTilt: destTilt, destZoom: destZoom, pSpeed: pSpeed, zSpeed: zSpeed, started: started)
+    }
+
+    func holdMove(dPan: Double, dTilt: Double, dZoom: Double) {
+        let tookOver = motionTimer != nil
+        stopGlideTimer()
+        if tookOver {
+            zoomGoal = nil
+            zoomFinish = false
+        }
+        if dPan != 0 || dTilt != 0 {
+            aim(pan: (aimPan ?? pan) + dPan, tilt: (aimTilt ?? tilt) + dTilt, fromMotion: true)
+        }
+        if dZoom != 0 {
+            let base = zoomGoal ?? aimZoom ?? zoom
+            zoomGoal = min(max(base + dZoom, zoomMin), zoomMax)
+            zoomPace = motionSpeed
+            flushZoomGoal(final: false)
+        }
+    }
+
+    /// Sends a last zoom step smaller than five units when a held key is released.
+    func releaseHold() {
+        zoomFinish = true
+        flushZoomGoal(final: true)
+    }
+
+    /// Keyboard and Stream Deck keys share one clock. Each source is one key.
+    /// Opposite directions cancel, and releasing one key leaves the others running.
+    func setHold(id: String, axes: HoldAxes) {
+        if axes.pan == 0, axes.tilt == 0, axes.zoom == 0 {
+            holds.removeValue(forKey: id)
+        } else if holds[id] != nil || holds.count < 32 {
+            holds[id] = axes
+        }
+        let sum = summedHolds()
+        if sum.zoom == 0, heldZoom { releaseHold() }
+        heldZoom = sum.zoom != 0
+        guard sum.pan != 0 || sum.tilt != 0 || sum.zoom != 0 else {
+            holdTimer?.invalidate()
+            holdTimer = nil
+            return
+        }
+        if holdTimer == nil {
+            let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
+                Task { @MainActor in Gimbal.shared.repeatHold() }
+            }
+            holdTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        repeatHold()
+    }
+
+    func repeatHold() {
+        let sum = summedHolds()
+        guard sum.pan != 0 || sum.tilt != 0 || sum.zoom != 0 else { return }
+        let sign = invertPan ? -1.0 : 1.0
+        let step = motionSpeed * 0.05
+        holdMove(
+            dPan: Double(sum.pan) * sign * step,
+            dTilt: Double(sum.tilt) * step,
+            dZoom: Double(sum.zoom) * step
+        )
+    }
+
+    private func summedHolds() -> HoldAxes {
+        var pan = 0
+        var tilt = 0
+        var zoom = 0
+        for axes in holds.values {
+            pan += axes.pan
+            tilt += axes.tilt
+            zoom += axes.zoom
+        }
+        return HoldAxes(pan: max(-1, min(1, pan)), tilt: max(-1, min(1, tilt)), zoom: max(-1, min(1, zoom)))
+    }
+
+    /// Drops pan, tilt, and zoom commands that have not been sent yet.
+    /// A command the camera already accepted can still finish.
+    func stopMotion() {
+        holds.removeAll()
+        holdTimer?.invalidate()
+        holdTimer = nil
+        heldZoom = false
+        cancelMotion()
+        target.clearPanTilt()
+        target.clearZoom()
+        aimPan = nil
+        aimTilt = nil
+        aimZoom = nil
+        zoom = zoomNow
+        if !driving { busy = false }
+    }
+
+    private func commitZoom(_ value: Double) {
         let z = min(max(value, zoomMin), zoomMax).rounded()
         zoom = z
         aimZoom = z
@@ -814,7 +1006,89 @@ final class Gimbal: ObservableObject {
         startDrive()
     }
 
-    func nudgeZoom(_ delta: Double) { setZoom((aimZoom ?? zoom) + delta) }
+    private func cancelMotion() {
+        motionGen &+= 1
+        motionTimer?.invalidate()
+        motionTimer = nil
+        zoomGoal = nil
+        zoomFinish = false
+    }
+
+    private func stopGlideTimer() {
+        guard motionTimer != nil else { return }
+        motionGen &+= 1
+        motionTimer?.invalidate()
+        motionTimer = nil
+    }
+
+    private func glide(
+        timer: Timer,
+        destPan: Double,
+        destTilt: Double,
+        destZoom: Double?,
+        pSpeed: Double,
+        zSpeed: Double,
+        started: Date
+    ) {
+        if Date().timeIntervalSince(started) > 30 {
+            aim(pan: destPan, tilt: destTilt, fromMotion: true)
+            if let destZoom {
+                zoomGoal = nil
+                commitZoom(destZoom)
+            }
+            finishGlide(timer)
+            return
+        }
+        let nextPan = approach(aimPan ?? pan, destPan, pSpeed * 0.05)
+        let nextTilt = approach(aimTilt ?? tilt, destTilt, pSpeed * 0.05)
+        aim(pan: nextPan, tilt: nextTilt, fromMotion: true)
+        if let destZoom {
+            zoomGoal = destZoom
+            zoomPace = zSpeed
+            flushZoomGoal(final: true)
+        }
+        let panDone = abs(nextPan - destPan) < 0.05 && abs(nextTilt - destTilt) < 0.05
+        let zoomDone: Bool
+        if let destZoom {
+            zoomDone = zoomGoal == nil && abs((aimZoom ?? zoomNow) - destZoom) < 1
+        } else {
+            zoomDone = true
+        }
+        if panDone && zoomDone { finishGlide(timer) }
+    }
+
+    private func finishGlide(_ timer: Timer) {
+        timer.invalidate()
+        if motionTimer === timer { motionTimer = nil }
+        if !driving { busy = false }
+    }
+
+    /// One zoom command at a time. A repeated command, or a new one before
+    /// the lens reports, holds the lens where it is.
+    private func flushZoomGoal(final: Bool) {
+        guard let goal = zoomGoal else {
+            zoomFinish = false
+            return
+        }
+        let at = aimZoom ?? zoomNow
+        if abs(at - goal) < 1 {
+            zoomGoal = nil
+            zoomFinish = false
+            return
+        }
+        if let aimZoom, abs(zoomNow - aimZoom) >= 2 { return }
+        let remaining = abs(goal - at)
+        if remaining < 5, !final, !zoomFinish { return }
+        let pace = max(5, zoomPace * 0.45)
+        let step = min(pace, remaining)
+        let next = approach(at, goal, step).rounded()
+        if abs(next - at) < 0.5 { return }
+        commitZoom(next)
+        if abs(next - goal) < 0.5 {
+            zoomGoal = nil
+            zoomFinish = false
+        }
+    }
 
     func setRoll(_ value: Double) {
         let r = min(max(value, rollMin), rollMax).rounded()
@@ -879,9 +1153,11 @@ final class Gimbal: ObservableObject {
         if aimRoll == nil { roll = s.roll }
         if aimFocus == nil { focus = Double(s.focus) }
         if aimFocusAuto == nil { focusAuto = s.focusAuto != 0 }
+        flushZoomGoal(final: false)
     }
 
     private func startDrive() {
+        busy = true
         guard !driving else { return }
         driving = true
         let target = self.target
@@ -1029,6 +1305,8 @@ final class Gimbal: ObservableObject {
             Task { @MainActor in
                 self.driving = false
                 self.connected = false
+                self.cancelMotion()
+                self.busy = false
             }
             return
         }
@@ -1189,8 +1467,16 @@ final class Gimbal: ObservableObject {
             self.aimFocus = left.focus
             self.aimFocusAuto = left.focusAuto.map { $0 != 0 }
             self.driving = false
-            if !left.idle { self.startDrive() }
-            else { self.refresh() }
+            self.flushZoomGoal(final: false)
+            let still = self.target.snapshot()
+            if !still.idle {
+                self.startDrive()
+            } else if self.motionTimer != nil {
+                self.busy = true
+            } else {
+                self.busy = false
+                self.refresh()
+            }
         }
     }
 }
@@ -1296,6 +1582,7 @@ struct Pad: View {
 
 struct ArrowButton: View {
     let symbol: String
+    var help: String = ""
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -1305,6 +1592,7 @@ struct ArrowButton: View {
                 .background(.quaternary.opacity(0.7), in: Circle())
         }
         .buttonStyle(.plain)
+        .help(help)
     }
 }
 
@@ -1406,6 +1694,7 @@ struct Panel: View {
         }
         .onChange(of: showPreview) { _, _ in syncPreview() }
         .onChange(of: preview.popped) { _, _ in syncPreview() }
+        .background(KeyableMenu())
     }
 
     /// A menu panel closes itself when the app is no longer the active one.
@@ -1443,6 +1732,14 @@ struct Panel: View {
                     Circle().fill(g.connected ? .green : .secondary).frame(width: 6, height: 6)
                     Text(g.connected ? "Webcam connected" : "Not connected")
                         .font(.caption).foregroundStyle(.secondary)
+                    if g.busy {
+                        Button("Stop") {
+                            HoldKeys.releaseAll()
+                            g.stopMotion()
+                        }
+                        .controlSize(.small)
+                        .help("Stop scheduling the move. Esc does this too.")
+                    }
                     Spacer(minLength: 4)
                     Text(String(format: "P %.1f°  T %.1f°  %.2f×", g.pan, g.tilt, g.zoomNow / 100))
                         .font(.system(.caption, design: .rounded).monospacedDigit())
@@ -1493,6 +1790,11 @@ struct Panel: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .onChange(of: captureSize) { _, _ in preview.useCaptureSize() }
+            if showPreview, !preview.picture.isEmpty {
+                Text(preview.picture)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
 
             Pad(g: g)
 
@@ -1505,7 +1807,7 @@ struct Panel: View {
                     }
                     GridRow {
                         ArrowButton(symbol: "chevron.left") { g.nudge(dx: -1, dy: 0) }
-                        ArrowButton(symbol: "scope") { g.recenter() }
+                        ArrowButton(symbol: "scope", help: "Move back to the saved center. Esc stops the move.") { g.recenter() }
                         ArrowButton(symbol: "chevron.right") { g.nudge(dx: 1, dy: 0) }
                     }
                     GridRow {
@@ -1543,6 +1845,8 @@ struct Panel: View {
                     g.nudgeZoom(25)
                 }
             }
+
+            PresetSection()
 
             if advanced {
                 AxisSlider(
@@ -1607,8 +1911,11 @@ struct Panel: View {
                       ? "Put the controls back in the menu"
                       : "Keep the controls in a window on the desktop")
                 Spacer()
-                Text("⌃⌥ arrows, C, −/+, 1–3")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("⌃⌥ arrows, C, −/+, 1–3")
+                    Text("WASD in the window · Esc stops")
+                }
+                .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.plain)
@@ -1631,7 +1938,14 @@ struct Panel: View {
 
 @main
 struct Pocket3CompanionApp: App {
-    init() { HotKeys.register() }
+    init() {
+        HotKeys.register()
+        HoldKeys.install()
+        if UserDefaults.standard.bool(forKey: "bridgeOn") {
+            _ = bridgeToken()
+            Bridge.shared.start()
+        }
+    }
     var body: some Scene {
         MenuBarExtra("Pocket3 Companion", systemImage: "camera.viewfinder") {
             Panel()

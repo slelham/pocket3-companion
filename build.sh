@@ -22,8 +22,9 @@ clang -O2 -c ptz.c -o build/ptz.o
 clang -O2 -fobjc-arc -c format.m -o build/format.o
 clang -O2 cli.c build/ptz.o -framework IOKit -framework CoreFoundation -o "$BIN_DIR/pocket3-companion"
 swiftc -O -swift-version 5 -parse-as-library -import-objc-header ptz.h \
-  Pocket3Companion.swift build/ptz.o build/format.o \
-  -framework IOKit -framework CoreFoundation -framework Carbon -framework AVFoundation -framework Foundation \
+  logic.swift Pocket3Companion.swift Extras.swift build/ptz.o build/format.o \
+  -framework IOKit -framework CoreFoundation -framework Carbon -framework AVFoundation \
+  -framework Foundation -framework UniformTypeIdentifiers \
   -o "$APP/Contents/MacOS/Pocket3Companion"
 
 ICONSET="build/AppIcon.iconset"
@@ -39,6 +40,16 @@ sips -z 512 512 assets/icon.png --out "$ICONSET/icon_256x256@2x.png" >/dev/null
 sips -z 512 512 assets/icon.png --out "$ICONSET/icon_512x512.png" >/dev/null
 cp assets/icon.png "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+
+PLUGIN="streamdeck/local.slelham.pocket3.sdPlugin"
+swiftc -framework AppKit -framework Foundation streamdeck/make-icons.swift -o build/make-icons
+./build/make-icons "$PLUGIN/imgs" assets/icon.png
+STAGE="$(mktemp -d)"
+ditto --norsrc "$PLUGIN" "$STAGE/local.slelham.pocket3.sdPlugin"
+find "$STAGE" -name .DS_Store -delete
+ditto -c -k --norsrc --keepParent "$STAGE/local.slelham.pocket3.sdPlugin" \
+  "$APP/Contents/Resources/Pocket3Companion.streamDeckPlugin"
+rm -rf "$STAGE"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

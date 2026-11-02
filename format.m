@@ -31,6 +31,19 @@ int p3_apply_format(void *devicePtr, void *formatPtr, int fps) {
     }
 }
 
+// Reading the duration does not raise. Setting it does, and aborts a Swift caller.
+double p3_active_fps(void *devicePtr) {
+    if (devicePtr == NULL) return 0;
+    @try {
+        AVCaptureDevice *device = (__bridge AVCaptureDevice *)devicePtr;
+        CMTime dur = device.activeVideoMinFrameDuration;
+        if (CMTIME_IS_INVALID(dur) || dur.value == 0) return 0;
+        return (double)dur.timescale / (double)dur.value;
+    } @catch (NSException *ignored) {
+        return 0;
+    }
+}
+
 int p3_session_start(void *sessionPtr) {
     if (sessionPtr == NULL) return 1;
     AVCaptureSession *session = (__bridge AVCaptureSession *)sessionPtr;

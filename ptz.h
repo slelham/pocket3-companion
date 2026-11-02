@@ -60,6 +60,9 @@ int ptz_settle(const double *pan, const double *tilt, const int *zoom, double se
 // Sets an AVCaptureDevice format. Returns 0 on success. A thrown camera
 // exception is caught here so the caller stays alive.
 int p3_apply_format(void *device, void *format, int fps);
+// Reads the active frame rate. Setting the frame duration aborts the app,
+// so this only reads it.
+double p3_active_fps(void *device);
 int p3_session_start(void *session);
 int p3_session_stop(void *session);
 
