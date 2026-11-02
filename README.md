@@ -10,7 +10,7 @@ This project is not affiliated with DJI.
 
 ## What you need
 
-- An Apple Silicon Mac on macOS 14 or later. The download is arm64 only.
+- An Apple silicon or Intel Mac on macOS 14 or later.
 - The Pocket 3 plugged into USB-C, with **Webcam** chosen on the camera. In that mode it does not show up as a disk.
 - The Xcode command-line tools, only if you build it yourself.
 
@@ -18,7 +18,7 @@ The app does not open by itself when you plug the camera in. Open it once. It th
 
 ## Install
 
-1. Download `Pocket3Companion-1.0.0-mac-arm64.zip` from [Releases](https://github.com/slelham/pocket3-companion/releases).
+1. Download the zip for that Mac from [Releases](https://github.com/slelham/pocket3-companion/releases/latest). Apple silicon is `Pocket3Companion-1.1.0-mac-arm64.zip`. Intel is `Pocket3Companion-1.1.0-mac-x86_64.zip`.
 2. Unzip it and move **Pocket3 Companion** to `/Applications`.
 3. The first time, macOS will block it. The app is signed on the machine that built it, not by Apple. Right-click the app, choose **Open**, and confirm. If that is not offered, go to **System Settings → Privacy & Security** and choose **Open Anyway**.
 4. Open the app. A viewfinder icon appears in the menu bar. The app has no Dock icon.
